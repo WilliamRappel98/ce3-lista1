@@ -1,0 +1,408 @@
+---
+title: ''
+subtitle: ""
+author: ""
+date: ""
+
+output:
+  pdf_document:
+  fig_crop: false
+highlight: tango
+number_sections: false
+fig_caption: true
+keep_tex: true
+includes:
+  in_header: Estilo.sty
+classoption: a4paper
+always_allow_html: true
+---
+
+\begin{center}
+{\Large
+  DEPARTAMENTO DE ESTATÍSTICA} \\
+\vspace{0.5cm}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=9cm, keepaspectratio]{logo-UnB.eps}
+\end{figure}
+\vskip 1em
+{\large
+  16 de novembro de 2022}
+\vskip 3em
+{\LARGE
+  \textbf{Lista 1: Computação eficiente (dados em memória)}} \\
+\vskip 1em
+{\LARGE
+  \textbf{Resolução - William Rappel - 22/006032}} \\
+\vskip 1em
+{\Large
+  Computação em Estatística para dados e cálculos massivos} \\
+\vskip 1em
+{\Large
+  Tópicos especiais em Estatística 2} \\
+\vskip 3em
+{\Large
+  Prof. Guilherme Rodrigues} \\
+\vskip 1em
+{\Large
+  César Augusto Fernandes Galvão (aluno colaborador)} \\
+\vskip 1em
+{\Large
+  Gabriel Jose dos Reis Carvalho (aluno colaborador)} \\
+\end{center}
+
+\vskip 5em
+
+\begin{enumerate}
+\item \textbf{As questões deverão ser respondidas em um único relatório \emph{PDF} ou \emph{html}, produzido usando as funcionalidades do \emph{Rmarkdown} ou outra ferramenta equivalente}.
+\item \textbf{O aluno poderá consultar materiais relevantes disponíveis na internet, tais como livros, \emph{blogs} e artigos}.
+\item \textbf{O trabalho é individual. Suspeitas de plágio e compartilhamento de soluções serão tratadas com rigor.}
+\item \textbf{Os códigos \emph{R} utilizados devem ser disponibilizados na integra, seja no corpo do texto ou como anexo.}
+\item \textbf{O aluno deverá enviar o trabalho até a data especificada na plataforma Microsoft Teams.}
+\item \textbf{O trabalho será avaliado considerando o nível de qualidade do relatório, o que inclui a precisão das respostas, a pertinência das soluções encontradas, a formatação adotada, dentre outros aspectos correlatos.}
+\item \textbf{Escreva seu código com esmero, evitando operações redundantes, visando eficiência computacional, otimizando o uso de memória, comentando os resultados e usando as melhores práticas em programação.}
+\end{enumerate}
+
+
+```{r setup, results=FALSE, message=FALSE, echo=FALSE, warnings=FALSE}
+knitr::opts_chunk$set(echo=TRUE, warnings=FALSE)
+
+# carregando os pacotes necessários
+if (!require('pacman')) install.packages('pacman')
+p_load(tidyverse, rmdformats, stringr, vroom, dtplyr, data.table, rvest, microbenchmark, geobr)
+```
+
+\newpage
+
+Nessa lista, utilizamos os pacotes `vroom` e `data.table` para analisar, com rapidez computacional e eficiente uso de memória, dados públicos sobre a vacinação contra a Covid-19.
+
+## Questão 1: leitura eficiente de dados
+
+**a)** **Utilizando códigos R**, crie uma pasta (chamada *dados*) em seu computador e faça o *download* dos arquivos referentes aos estados do Acre, Alagoas, Amazonas e  Amapá, disponíveis no endereço eletrônico a seguir. [*https://opendatasus.saude.gov.br/dataset/covid-19-vacinacao/resource/5093679f-12c3-4d6b-b7bd-07694de54173?inner_span=True*](https://opendatasus.saude.gov.br/dataset/covid-19-vacinacao/resource/5093679f-12c3-4d6b-b7bd-07694de54173?inner_span=True)
+
+**Dica**: Veja os slides sobre *web scraping* disponibilizados na página da equipe na plataforma MS Teams, em *Materiais de estudo*, na aba *arquivos*; Eles permitem a imediata identificação dos endereços dos arquivos a serem baixados. Use *wi-fi* para fazer os downloads!
+
+\textcolor{red}{\bf Solução}
+
+Primeiro, vamos criar a pasta dados, caso ela não exista.
+
+```{r}
+folder <- 'dados'
+if (!file.exists(folder)) dir.create(folder)
+```
+
+Em seguida, vamos realizar a leitura da página html do link de interesse.
+
+```{r}
+url <- 'https://opendatasus.saude.gov.br/dataset/covid-19-vacinacao/resource/5093679f-12c3-4d6b-b7bd-07694de54173?inner_span=True'
+page <- url %>%
+  read_html()
+```
+
+Agora, pegamos a lista de endereços e o título de cada um. Checamos se possuem o mesmo comprimento.
+
+```{r}
+links <- page %>%
+  html_nodes('.notes a') %>%
+  html_attr('href')
+titles <- page %>%
+  html_nodes('.notes a') %>%
+  html_text()
+length(links) == length(titles)
+```
+
+Vamos filtrar apenas os links e títulos que envolvem os estados Acre, Alagoas, Amazonas e Amapá.
+
+```{r}
+idx <- titles %>%
+  str_detect('(AC)|(AL)|(AM)|(AP)')
+links <- links[idx]
+titles <- titles[idx]
+file_names <- titles %>%
+  str_to_lower() %>%
+  str_remove_all('(dados)| ')
+```
+
+Agora, realizamos o download dos dados.
+
+```{r}
+path <- folder %>%
+  str_c('/', file_names, '.csv')
+for (i in seq_along(links)) {
+  if (!file.exists(path[i])) {
+    download.file(links[i], path[i])
+  }
+}
+```
+
+**b)** Usando a função `p_load` (do pacote `pacman`), carregue o pacote `vroom` (que deve ser usado em toda a Questão 1) e use-o para carregar o primeiro dos arquivos baixados para o R (*Dados AC - Parte 1*). Descreva brevemente o banco de dados.
+
+\textcolor{red}{\bf Solução}
+
+Vamos realizar a leitura do arquivo `ac-parte1.csv`.
+
+```{r}
+ac_1 <- path[1] %>%
+  vroom(
+    delim=';',
+    locale=locale('br', encoding='UTF-8'),
+    num_threads=3
+  )
+ac_1
+```
+
+O banco de dados apresenta 552.954 linhas e 32 colunas. Cada linha se refere a um paciente/indivíduo e cada coluna a alguma informação demográfica daquele indivíduo ou referente à vacinação do mesmo.
+
+Das 32 colunas, 23 são do tipo `character`, 7 do tipo `double` e 2 do tipo `date`.
+
+**c)** Qual é o tamanho total (em Megabytes) de todos os arquivos baixados (use a função `file.size`)? Qual é o espaço ocupado pelo arquivo *Dados AC - Parte 1* na memória do `R` (use a função `object.size`) e no Disco rígido (*HD*)? Comente os resultados.
+  
+\textcolor{red}{\bf Solução}
+
+Primeiro, calculamos o tamanho total da pasta contendo todos os arquivos baixados.
+
+```{r}
+sum(file.size(path))/10^6
+```
+
+Logo, o tamanho total é de mais de 8 GB.
+
+Em seguida, calculamos o espaço ocupado pelo arquivo `ac-parte1.csv` na memória do R e no Disco Rígido.
+
+```{r}
+format(object.size(ac_1), units='Mb')
+```
+
+```{r}
+file.size(path[1])/10^6
+```
+
+O arquivo na memória do R ocupa um espaço de 256 MB, que é um valor inferior aos 283 MB ocupados no HD.
+
+**d)** Repita o procedimento do item **b)**, mas, dessa vez, carregue para a memória apenas os casos em que a vacina aplicada foi a Janssen. Para tanto, faça a filtragem usando uma conexão `pipe()`. Observe que a filtragem deve ser feita durante o carregamento, e não após ele.
+
+Quantos megabites deixaram de ser carregados para a memória RAM (ao fazer a filtragem durante a leitura, e não no próprio `R`)?
+
+\textcolor{red}{\bf Solução}
+
+A coluna que informa a vacina aplicada é `vacina_fabricante_nome`.
+
+```{r}
+table(ac_1$vacina_fabricante_nome)
+```
+
+Vamos utilizar o comando `pipe()` para realizar este filtro durante o carregamento.
+
+```{r}
+command <- 'findstr -i "document JANSSEN" dados\\ac-parte1.csv'
+ac_1_janssen <- command %>%
+  pipe() %>%
+  vroom(
+    delim=';',
+    locale=locale('br', encoding='UTF-8'),
+    num_threads=3
+  )
+ac_1_janssen
+```
+
+Em seguida, vemos o espaço ocupado pelo objeto `dados_ac_1_jansenn`.
+
+```{r}
+format(object.size(ac_1_janssen), units='Mb')
+```
+
+Dessa forma, ao fazer a filtragem durante a leitura, e não no próprio `R`, deixamos de carregar 251 MB. 
+
+**e)** Carregue para o `R` **todos** os arquivos da pasta de uma única vez (usando apenas um comando `R`, sem métodos iterativos), trazendo apenas os casos em que a vacina aplicada foi a Janssen. 
+
+\textcolor{red}{\bf Solução}
+
+Concatenamos o comando e executamos o carregamento de uma só vez.
+
+```{r}
+command <- 'findstr -i "document JANSSEN" dados\\*.csv'
+janssen <- command %>%
+  pipe() %>%
+  vroom(
+    delim=';',
+    locale=locale('br', encoding='UTF-8'),
+    num_threads=3
+    )
+janssen <- janssen %>%
+  filter(estabelecimento_uf != 'estabelecimento_uf')
+janssen
+```
+
+```{r}
+rm(list=ls())
+```
+
+## Questão 2: manipulação de dados
+
+**a)** Utilizando o pacote `data.table`, repita o procedimento do item **1e)**, agora mantendo, durante a leitura, todas as vacinas e apenas as colunas `estabelecimento_uf`, `vacina_descricao_dose` e `estabelecimento_municipio_codigo`. Use o pacote `geobr` para obter os dados sobre as regiões de saúde do Brasil (comando `geobr::read_health_region()`). O pacote `geobr` não está mais disponível para download no CRAN; Para instalá-lo, use o link https://cran.r-project.org/src/contrib/Archive/geobr/. 
+
+A tabela que relaciona o código do IBGE (`estabelecimento_municipio_codigo`, na tabela de vacinação) e o código de saúde (`code_health_region`, na tabela de regiões de saúde) está disponível pelo link https://sage.saude.gov.br/paineis/regiaoSaude/lista.php?output=html& e nos arquivos da lista.
+
+\textcolor{red}{\bf Solução}
+
+Primeiro, realizamos o carregamento com a função `fread`.
+
+```{r}
+janssen_dt <- fread(
+  cmd='findstr ; dados\\*.csv',
+  select=c('estabelecimento_uf', 'vacina_descricao_dose', 'estabelecimento_municipio_codigo'),
+  encoding='UTF-8',
+  sep=';'
+)
+janssen_dt <- janssen_dt[estabelecimento_uf != 'estabelecimento_uf']
+janssen_dt[, estabelecimento_municipio_codigo := as.integer(estabelecimento_municipio_codigo)]
+```
+
+Em seguida, obtemos os dados das regiões de saúde do Brasil.
+
+```{r}
+regioes_saude_br <- geobr::read_health_region() %>%
+  as.data.table()
+regioes_saude_br[, geom := NULL]
+regioes_saude_br[, code_health_region := as.integer(code_health_region)]
+```
+
+Por último, lemos a tabela que relaciona o código do IBGE com o código de saúde.
+
+```{r}
+codigos <- fread(
+  file='Tabela_codigos.csv',
+  encoding='UTF-8',
+  select=c('Cód IBGE', 'Cód Região de Saúde'),
+  col.names=c('estabelecimento_municipio_codigo', 'code_health_region')
+)
+```
+  
+**b)** Junte (*join*) os dados da base de vacinações com o das regiões de saúde e descreva brevemente o que são as regiões (use documentação do governo, não se atenha à documentação do pacote). Em seguida, crie as variáveis descritas abaixo:
+  
+1. Quantidade de vacinados por região de saúde;
+2. Condicionalmente, a *faixa de vacinação* por região de saúde (alta ou baixa, em relação à mediana da distribuição de vacinações). 
+
+Crie uma tabela com as 5 regiões de saúde com menos vacinados em cada *faixa de vacinação*.
+
+\textcolor{red}{\bf Solução}
+
+A Resolução Nº 1 do Ministério da Saúde, datada de 29 de Setembro de 2011 define região de saúde como sendo: o espaço geográfico contínuo constituído por agrupamento de Municípios limítrofes, delimitado a partir de identidades culturais, econômicas e sociais e de redes de comunicação e infraestrutura de transportes compartilhados, com a finalidade de integrar a organização, o planejamento e a execução de ações e serviços de saúde.
+
+Agora, vamos realizar o join e, em seguida, as agregações.
+
+```{r}
+janssen_dt_full <- janssen_dt %>%
+  merge(
+    codigos,
+    by.x='estabelecimento_municipio_codigo',
+    by.y='estabelecimento_municipio_codigo',
+    all.x=TRUE
+  ) %>%
+  merge(
+    regioes_saude_br,
+    by.x='code_health_region',
+    by.y='code_health_region',
+    all.x=TRUE
+  )
+janssen_dt_full
+```
+
+```{r}
+janssen_dt_full[, .(n = .N), by = name_health_region][, med := median(n)][, faixa_de_vacinacao := ifelse(n < med, 'baixa', 'alta')][order(faixa_de_vacinacao, n)][, id := 1:.N, by = faixa_de_vacinacao][id <= 5]
+```
+
+**c)** Utilizando o pacote `dtplyr`, repita o procedimento do item **b)** (lembre-se das funções `mutate`, `group_by`, `summarise`, entre outras). Exiba os resultados.
+
+\textcolor{red}{\bf Solução}
+
+Primeiro, os joins. Depois, as agregações.
+
+```{r}
+janssen_dt %>%
+  lazy_dt() %>%
+  left_join(codigos, by='estabelecimento_municipio_codigo') %>%
+  left_join(regioes_saude_br, by='code_health_region') %>%
+  group_by(name_health_region) %>%
+  summarise(n = n()) %>%
+  mutate(faixa_de_vacinacao = if_else(n < median(n), 'baixa', 'alta')) %>%
+  arrange(faixa_de_vacinacao, n) %>%
+  group_by(faixa_de_vacinacao) %>%
+  mutate(id = 1:n()) %>%
+  filter(id <= 5) %>%
+  as_tibble()
+```
+  
+**d)** Com o pacote `microbenchmark`, compare o tempo de execução dos itens **b)** e **c)**. Isso é, quando se adota o `data.table` e o `dtplyr`, respectivamente. 
+
+**Extra**: Inclua na comparação a execução usando o próprio `dplyr`. Para isso, primeiro converta os 3 objetos do item **a)** para a classe `tibble`.
+  
+\textcolor{red}{\bf Solução}
+
+Primeiro, criamos funções para realizar cada processo.
+
+```{r}
+# data.table
+func_dt <- function() {
+  full <- janssen_dt %>%
+  merge(
+    codigos,
+    by.x='estabelecimento_municipio_codigo',
+    by.y='estabelecimento_municipio_codigo',
+    all.x=TRUE
+  ) %>%
+  merge(
+    regioes_saude_br,
+    by.x='code_health_region',
+    by.y='code_health_region',
+    all.x=TRUE
+  )
+  full[, .(n = .N), by = name_health_region][, med := median(n)][, faixa_de_vacinacao := ifelse(n < med, 'baixa', 'alta')][order(faixa_de_vacinacao, n)][, id := 1:.N, by = faixa_de_vacinacao][id <= 5]
+}
+
+# dtplyr
+func_dtplyr <- function() {
+  janssen_dt %>%
+    lazy_dt() %>%
+    left_join(codigos, by='estabelecimento_municipio_codigo') %>%
+    left_join(regioes_saude_br, by='code_health_region') %>%
+    group_by(name_health_region) %>%
+    summarise(n = n()) %>%
+    mutate(faixa_de_vacinacao = if_else(n < median(n), 'baixa', 'alta')) %>%
+    arrange(faixa_de_vacinacao, n) %>%
+    group_by(faixa_de_vacinacao) %>%
+    mutate(id = 1:n()) %>%
+    filter(id <= 5) %>%
+    as_tibble()
+}
+
+# dplyr
+func_dplyr <- function() {
+  x_tbl <- janssen_dt %>% as_tibble()
+  y_tbl <- codigos %>% as_tibble()
+  z_tbl <- regioes_saude_br %>% as_tibble()
+  x_tbl %>%
+    left_join(y_tbl, by='estabelecimento_municipio_codigo') %>%
+    left_join(z_tbl, by='code_health_region') %>%
+    group_by(name_health_region) %>%
+    summarise(n = n()) %>%
+    mutate(faixa_de_vacinacao = if_else(n < median(n), 'baixa', 'alta')) %>%
+    arrange(faixa_de_vacinacao, n) %>%
+    group_by(faixa_de_vacinacao) %>%
+    mutate(id = 1:n()) %>%
+    filter(id <= 5)
+}
+```
+
+Em seguida, aplicamos a comparação com `microbenchmark`.
+
+```{r}
+microbenchmark(
+  data.table = func_dt(),
+  dtplyr     = func_dtplyr(),
+  dplyr      = func_dplyr(),
+  times      = 10
+)
+```
+
+Portanto, utilizando a mediana como critério, o tempo de execução do `dtplyr` foi o menor, seguido pelo `dplyr` e, por último, o `data.table`.
