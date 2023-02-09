@@ -64,8 +64,8 @@ always_allow_html: true
 \end{enumerate}
 
 
-```{r setup, results=FALSE, message=FALSE, echo=FALSE, warnings=FALSE}
-knitr::opts_chunk$set(echo=TRUE, warnings=FALSE)
+```{r setup, results=FALSE, message=FALSE, echo=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE)
 
 # carregando os pacotes necessários
 if (!require('pacman')) install.packages('pacman')
